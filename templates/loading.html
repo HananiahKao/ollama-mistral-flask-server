@@ -10,6 +10,9 @@
         .progress-bar { width: 100%; max-width: 500px; background-color: #e0e0e0; border-radius: 10px; overflow: hidden; }
         .progress-bar-fill { height: 20px; width: 0%; background-color: #4CAF50; transition: width 0.4s ease-in-out; }
         p#status { margin-top: 10px; font-size: 1.1em; }
+        .error { color: #d32f2f; }
+        .retry-btn { background-color: #2196F3; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; margin-top: 10px; }
+        .retry-btn:hover { background-color: #1976D2; }
     </style>
 </head>
 <body>
@@ -22,42 +25,111 @@
             <div class="progress-bar-fill" id="progressBar"></div>
         </div>
         <p id="status">Getting started...</p>
+        <button id="retryBtn" class="retry-btn" style="display: none;" onclick="location.reload()">Retry</button>
     </div>
 
     <script>
         const progressBar = document.getElementById('progressBar');
         const statusText = document.getElementById('status');
         const thumbnailImg = document.getElementById('thumbnail');
-        const source = new EventSource(`/stream/{{ task_id }}`);
-
-        source.onmessage = function(event) {
-            const data = JSON.parse(event.data);
-            
-            // Update progress bar and status text
-            progressBar.style.width = data.progress + '%';
-            statusText.textContent = data.status;
-
-            if (data.thumbnail) {
-                thumbnailImg.src = data.thumbnail;
-            }
-
-            // If the task is complete, stop listening and replace the page
-            if (data.progress >= 100) {
+        const retryBtn = document.getElementById('retryBtn');
+        
+        let source = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 2;
+        let reconnectTimeout = null;
+        let taskCompleted = false;
+        
+        function connectToStream() {
+            if (source) {
                 source.close();
-                // A short delay to allow the user to read the "Complete" message
-                setTimeout(() => {
-                    document.open();
-                    document.write(data.html);
-                    document.close();
-                }, 500);
             }
-        };
+            
+            // Clear any existing reconnect timeout
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+            }
+            
+            // Don't reconnect if task is completed
+            if (taskCompleted) {
+                return;
+            }
+            
+            source = new EventSource(`/stream/{{ task_id }}`);
+            
+            source.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                
+                // Update progress bar and status text
+                progressBar.style.width = data.progress + '%';
+                statusText.textContent = data.status;
+                statusText.className = ''; // Clear error class
 
-        source.onerror = function(err) {
-            console.error("EventSource failed:", err);
-            statusText.textContent = "Error connecting to the server. Please refresh the page.";
-            source.close();
-        };
+                if (data.thumbnail) {
+                    thumbnailImg.src = data.thumbnail;
+                }
+
+                // If the task is complete, stop listening and replace the page
+                if (data.progress >= 100) {
+                    taskCompleted = true;
+                    source.close();
+                    // A short delay to allow the user to read the "Complete" message
+                    setTimeout(() => {
+                        document.open();
+                        document.write(data.html);
+                        document.close();
+                    }, 500);
+                }
+            };
+
+            source.onerror = function(err) {
+                console.error("EventSource failed:", err);
+                
+                // If we get a 404 (task not found), don't retry
+                if (source.readyState === EventSource.CLOSED) {
+                    statusText.textContent = "Task not found or completed. Please refresh the page.";
+                    statusText.className = 'error';
+                    retryBtn.style.display = 'inline-block';
+                    return;
+                }
+                
+                if (reconnectAttempts < maxReconnectAttempts && !taskCompleted) {
+                    reconnectAttempts++;
+                    statusText.textContent = `Connection lost. Reconnecting... (${reconnectAttempts}/${maxReconnectAttempts})`;
+                    statusText.className = 'error';
+                    
+                    // Use exponential backoff: 2s, 4s, 8s
+                    const delay = Math.pow(2, reconnectAttempts) * 1000;
+                    reconnectTimeout = setTimeout(() => {
+                        connectToStream();
+                    }, delay);
+                } else {
+                    statusText.textContent = "Connection failed. Please try refreshing the page.";
+                    statusText.className = 'error';
+                    retryBtn.style.display = 'inline-block';
+                    source.close();
+                }
+            };
+            
+            source.onopen = function() {
+                reconnectAttempts = 0; // Reset reconnect attempts on successful connection
+                statusText.className = ''; // Clear error class
+            };
+        }
+        
+        // Start the connection
+        connectToStream();
+        
+        // Clean up on page unload
+        window.addEventListener('beforeunload', function() {
+            if (source) {
+                source.close();
+            }
+            if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+            }
+        });
     </script>
 </body>
 </html> 

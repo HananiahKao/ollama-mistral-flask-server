@@ -13,6 +13,7 @@ import requests
 from bs4 import BeautifulSoup
 import torch
 from diffusers import StableDiffusionPipeline
+from diffusers.callbacks import PipelineCallback
 import diffusers
 
 OLLAMA_API_URL = os.getenv('OLLAMA_API_URL', 'http://localhost:11434/api/generate')
@@ -21,9 +22,66 @@ OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'mistral')
 app = Flask(__name__)
 pipe = None # Global pipeline object
 tasks = {} # Dictionary to hold the state of background tasks
+active_requests = set() # Track active requests to prevent duplicates
 
 # --- Tame the logs ---
 diffusers.logging.set_verbosity_error()
+
+class ProgressCallback(PipelineCallback):
+    def __init__(self, task_id):
+        super().__init__()
+        self.task_id = task_id
+        
+    @property
+    def tensor_inputs(self):
+        return ["latents"]
+        
+    def callback_fn(self, pipeline, step_index, timesteps, callback_kwargs):
+        try:
+            task = tasks.get(self.task_id)
+            if not task or task.get('should_stop'):
+                if task:
+                    task['status'] = "Cancelled by user."
+                raise Exception("Task cancelled by user.")
+
+            latents = callback_kwargs.get("latents")
+            if latents is None:
+                return callback_kwargs
+
+            num_steps = task.get('num_inference_steps', 100)
+            if num_steps is None:
+                num_steps = 100
+                
+            step = step_index
+            progress = 50 + int(((step + 1) / num_steps) * 40) # Use step + 1 for user-facing count
+            task.update({
+                'status': f'Generating image... Step {step + 1}/{num_steps}',
+                'progress': progress
+            })
+
+            if (step + 1) > 0 and (step + 1) % 10 == 0:
+                try:
+                    latents_scaled = 1 / pipeline.vae.config.scaling_factor * latents
+                    with torch.no_grad():
+                        image_tensor = pipeline.vae.decode(latents_scaled).sample
+                    image = pipeline.image_processor.postprocess(image_tensor, output_type='pil')[0]
+                    
+                    thumbnail = image.copy()
+                    thumbnail.thumbnail((128, 128))
+                    
+                    buf = io.BytesIO()
+                    thumbnail.save(buf, format="JPEG", quality=75)
+                    img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
+                    
+                    task.update({'thumbnail': f"data:image/jpeg;base64,{img_str}"})
+                    print(f"[DEBUG] Task {self.task_id}: Sent thumbnail at step {step + 1}")
+                except Exception as e:
+                    print(f"[ERROR] Task {self.task_id}: Could not generate thumbnail at step {step + 1}: {e}")
+            
+            return callback_kwargs
+        except Exception as e:
+            print(f"[ERROR] Task {self.task_id}: Callback error: {e}")
+            return callback_kwargs
 
 def load_sd_model():
     """Loads the Stable Diffusion model if it's not already loaded."""
@@ -110,46 +168,6 @@ def query_ollama(prompt):
     except Exception as e:
         return None, f"Error querying Ollama: {e}"
 
-def generation_progress_callback(task_id, pipe, step, timestep, callback_kwargs):
-    """Callback function to update progress and generate thumbnails."""
-    task = tasks.get(task_id)
-    if not task or task.get('should_stop'):
-        if task:
-            task['status'] = "Cancelled by user."
-        raise Exception("Task cancelled by user.")
-
-    latents = callback_kwargs.get("latents")
-    if latents is None:
-        return callback_kwargs
-
-    num_steps = task.get('num_inference_steps', 100)
-    progress = 50 + int((step / num_steps) * 40)
-    task.update({
-        'status': f'Generating image... Step {step + 1}/{num_steps}',
-        'progress': progress
-    })
-
-    if (step + 1) > 0 and (step + 1) % 10 == 0:
-        try:
-            latents_scaled = 1 / pipe.vae.config.scaling_factor * latents
-            with torch.no_grad():
-                image_tensor = pipe.vae.decode(latents_scaled).sample
-            image = pipe.image_processor.postprocess(image_tensor, output_type='pil')[0]
-            
-            thumbnail = image.copy()
-            thumbnail.thumbnail((128, 128))
-            
-            buf = io.BytesIO()
-            thumbnail.save(buf, format="JPEG", quality=75)
-            img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
-            
-            task.update({'thumbnail': f"data:image/jpeg;base64,{img_str}"})
-            print(f"[DEBUG] Task {task_id}: Sent thumbnail at step {step + 1}")
-        except Exception as e:
-            print(f"[ERROR] Task {task_id}: Could not generate thumbnail at step {step + 1}: {e}")
-    
-    return callback_kwargs
-
 def generate_image(prompt, task_id, num_inference_steps=100):
     if not prompt:
         return None, "No image prompt provided."
@@ -162,12 +180,13 @@ def generate_image(prompt, task_id, num_inference_steps=100):
 
         print(f"[DEBUG] Generating image with sanitized prompt: {clean_prompt}")
         
-        callback = partial(generation_progress_callback, task_id, pipe)
+        # Use the class-based callback
+        callback = ProgressCallback(task_id)
         
         with torch.no_grad():
             image = pipe(
                 clean_prompt, 
-                num_inference_steps=num_inference_steps, 
+                num_inference_steps=num_inference_steps,
                 callback_on_step_end=callback
             ).images[0]
         
@@ -203,9 +222,8 @@ def run_generation_task(task_id, context):
         })
         generated_image_data_url, err = generate_image(image_prompt, task_id, num_inference_steps=num_inference_steps)
         if err:
-            # If the image generation itself fails, we can still proceed to render the page
-            # with the content from Ollama, but without the generated image.
             print(f"[WARNING] Task {task_id}: Could not generate image: {err}")
+            generated_image_data_url = None
         
         tasks[task_id].update({'status': 'Inlining assets and finishing up...', 'progress': 95})
         soup = BeautifulSoup(html, 'html.parser')
@@ -224,19 +242,40 @@ def run_generation_task(task_id, context):
             if task_id in tasks:
                  tasks[task_id].update({'status': f'Failed: {e}', 'progress': 100, 'result': f"<h1>Error</h1><p>The page generation failed: {e}</p>"})
     finally:
-        # Ensure the task is removed from memory after completion or cancellation
+        # Add a delay to ensure the client receives the final result before cleanup
         if task_id in tasks:
-            del tasks[task_id]
+            print(f"[DEBUG] Task {task_id} completed, waiting 5 seconds before cleanup...")
+            time.sleep(5)  # Give client time to receive final result
+            if task_id in tasks:
+                del tasks[task_id]
+                print(f"[DEBUG] Task {task_id} cleaned up.")
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def generate(path):
+    # Create a unique request identifier to prevent duplicates
+    request_id = f"{request.remote_addr}_{request.headers.get('User-Agent', 'Unknown')}_{path}"
+    
+    # Check if this request is already being processed
+    if request_id in active_requests:
+        print(f"[INFO] Duplicate request detected for {request_id}, returning existing task")
+        # Find the existing task for this request
+        for task_id, task in tasks.items():
+            if task.get('request_id') == request_id:
+                return render_template('loading.html', task_id=task_id)
+    
     task_id = str(uuid.uuid4())
     user_agent = request.headers.get('User-Agent', 'Unknown')
     ip_address = request.remote_addr
     context = f"Request for '{request.path}' from IP: {ip_address}, User-Agent: {user_agent}"
     
-    tasks[task_id] = {'status': 'Pending', 'progress': 0}
+    # Mark this request as active
+    active_requests.add(request_id)
+    tasks[task_id] = {
+        'status': 'Pending', 
+        'progress': 0,
+        'request_id': request_id
+    }
 
     thread = threading.Thread(target=run_generation_task, args=(task_id, context))
     thread.start()
@@ -245,38 +284,69 @@ def generate(path):
 
 @app.route('/stream/<task_id>')
 def stream(task_id):
+    # Check if task exists before starting the stream
+    if task_id not in tasks:
+        return Response("Task not found", status=404, mimetype='text/plain')
+    
     def event_stream():
         last_progress = -1
         last_thumbnail = None
+        last_status = None
+        final_result_sent = False
+        
         try:
             while True:
-                time.sleep(1)
+                time.sleep(0.5)
                 task = tasks.get(task_id)
                 if not task:
+                    print(f"[INFO] Task {task_id} not found, ending stream")
                     break 
 
                 current_progress = task.get('progress', 0)
                 current_thumbnail = task.get('thumbnail', None)
+                current_status = task.get('status', '')
 
-                if current_progress > last_progress or current_thumbnail != last_thumbnail:
-                    data = {'status': task['status'], 'progress': current_progress}
+                # Check if anything has changed
+                has_changes = (current_progress > last_progress or 
+                             current_thumbnail != last_thumbnail or 
+                             current_status != last_status)
+
+                if has_changes:
+                    data = {'status': current_status, 'progress': current_progress}
                     if current_thumbnail:
                         data['thumbnail'] = current_thumbnail
-                    if task['progress'] >= 100:
+                    if current_progress >= 100 and not final_result_sent:
                         data['html'] = task['result']
+                        final_result_sent = True
+                        print(f"[DEBUG] Task {task_id}: Sent final result to client")
                     
                     yield f"data: {json.dumps(data)}\n\n"
                     last_progress = current_progress
                     last_thumbnail = current_thumbnail
+                    last_status = current_status
 
-                if task.get('progress', 0) >= 100 or task.get('should_stop'):
-                    break
+                # Stop conditions - only when task is complete or cancelled
+                if current_progress >= 100 or task.get('should_stop'):
+                    if final_result_sent:
+                        print(f"[DEBUG] Task {task_id}: Final result sent, ending stream")
+                        break
+                    else:
+                        # Wait a bit more to ensure final result is sent
+                        time.sleep(1)
+                    
         except GeneratorExit:
             print(f"[INFO] Client disconnected for task {task_id}. Flagging for cancellation.")
             if task_id in tasks:
                 tasks[task_id]['should_stop'] = True
+        except Exception as e:
+            print(f"[ERROR] Stream error for task {task_id}: {e}")
         finally:
             print(f"[INFO] Stream closed for task {task_id}.")
+            # Clean up the request tracking when the stream ends
+            if task_id in tasks:
+                request_id = tasks[task_id].get('request_id')
+                if request_id in active_requests:
+                    active_requests.remove(request_id)
 
     return Response(event_stream(), mimetype='text/event-stream')
 
