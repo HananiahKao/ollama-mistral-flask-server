@@ -110,23 +110,26 @@ def query_ollama(prompt):
     except Exception as e:
         return None, f"Error querying Ollama: {e}"
 
-def generation_progress_callback(task_id, step, timestep, latents):
+def generation_progress_callback(task_id, pipe, step, timestep, callback_kwargs):
     """Callback function to update progress and generate thumbnails."""
     task = tasks.get(task_id)
     if not task or task.get('should_stop'):
-        # If the task has been flagged to stop, raise an exception to halt the pipeline.
         if task:
             task['status'] = "Cancelled by user."
         raise Exception("Task cancelled by user.")
 
+    latents = callback_kwargs.get("latents")
+    if latents is None:
+        return callback_kwargs
+
     num_steps = task.get('num_inference_steps', 100)
     progress = 50 + int((step / num_steps) * 40)
     task.update({
-        'status': f'Generating image... Step {step}/{num_steps}',
+        'status': f'Generating image... Step {step + 1}/{num_steps}',
         'progress': progress
     })
 
-    if step > 0 and step % 10 == 0:
+    if (step + 1) > 0 and (step + 1) % 10 == 0:
         try:
             latents_scaled = 1 / pipe.vae.config.scaling_factor * latents
             with torch.no_grad():
@@ -141,9 +144,11 @@ def generation_progress_callback(task_id, step, timestep, latents):
             img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
             
             task.update({'thumbnail': f"data:image/jpeg;base64,{img_str}"})
-            print(f"[DEBUG] Task {task_id}: Sent thumbnail at step {step}")
+            print(f"[DEBUG] Task {task_id}: Sent thumbnail at step {step + 1}")
         except Exception as e:
-            print(f"[ERROR] Task {task_id}: Could not generate thumbnail at step {step}: {e}")
+            print(f"[ERROR] Task {task_id}: Could not generate thumbnail at step {step + 1}: {e}")
+    
+    return callback_kwargs
 
 def generate_image(prompt, task_id, num_inference_steps=100):
     if not prompt:
@@ -157,7 +162,7 @@ def generate_image(prompt, task_id, num_inference_steps=100):
 
         print(f"[DEBUG] Generating image with sanitized prompt: {clean_prompt}")
         
-        callback = partial(generation_progress_callback, task_id)
+        callback = partial(generation_progress_callback, task_id, pipe)
         
         with torch.no_grad():
             image = pipe(
@@ -172,15 +177,8 @@ def generate_image(prompt, task_id, num_inference_steps=100):
         print("[DEBUG] Image generated successfully.")
         return f"data:image/png;base64,{img_str}", None
     except Exception as e:
-        if "Task cancelled by user" in str(e):
-            print(f"--- Task {task_id} gracefully stopped by user. ---")
-        else:
-            print(f"[ERROR] Task {task_id} failed: {e}")
-            tasks[task_id].update({'status': f'Failed: {e}', 'progress': 100, 'result': f"<h1>Error</h1><p>The page generation failed: {e}</p>"})
-    finally:
-        # Ensure the task is removed from memory after completion or cancellation
-        if task_id in tasks:
-            del tasks[task_id]
+        print(f"[ERROR] Error in generate_image: {e}")
+        return None, f"Error generating image: {e}"
 
 def run_generation_task(task_id, context):
     try:
@@ -205,6 +203,8 @@ def run_generation_task(task_id, context):
         })
         generated_image_data_url, err = generate_image(image_prompt, task_id, num_inference_steps=num_inference_steps)
         if err:
+            # If the image generation itself fails, we can still proceed to render the page
+            # with the content from Ollama, but without the generated image.
             print(f"[WARNING] Task {task_id}: Could not generate image: {err}")
         
         tasks[task_id].update({'status': 'Inlining assets and finishing up...', 'progress': 95})
@@ -217,8 +217,16 @@ def run_generation_task(task_id, context):
         print(f"--- Task {task_id} finished in {time.time() - start_time:.2f}s ---")
 
     except Exception as e:
-        print(f"[ERROR] Task {task_id} failed: {e}")
-        tasks[task_id].update({'status': f'Failed: {e}', 'progress': 100, 'result': f"<h1>Error</h1><p>The page generation failed: {e}</p>"})
+        if "Task cancelled by user" in str(e):
+            print(f"--- Task {task_id} gracefully stopped by user. ---")
+        else:
+            print(f"[ERROR] Task {task_id} failed: {e}")
+            if task_id in tasks:
+                 tasks[task_id].update({'status': f'Failed: {e}', 'progress': 100, 'result': f"<h1>Error</h1><p>The page generation failed: {e}</p>"})
+    finally:
+        # Ensure the task is removed from memory after completion or cancellation
+        if task_id in tasks:
+            del tasks[task_id]
 
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
