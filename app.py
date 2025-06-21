@@ -95,11 +95,6 @@ The context for this generation is: {context}
     return prompt
 
 def query_ollama(prompt):
-    # E2E Test Mock: If test mode is enabled, return mock data and skip the real API call.
-    if os.getenv('E2E_TEST_MODE') == 'true':
-        print("[E2E_TEST] Mocking Ollama response.")
-        return ('<!DOCTYPE html><html><body><h1>Mock Page</h1><!-- image_prompt: a mock image --> <img id="generated-image" src=""></body></html>', None)
-
     payload = {"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}
     try:
         print(f"[DEBUG] Querying Ollama...")
@@ -111,11 +106,6 @@ def query_ollama(prompt):
         return None, f"Error querying Ollama: {e}"
 
 def generate_image(prompt):
-    # E2E Test Mock: If test mode is enabled, return mock data and skip the real generation.
-    if os.getenv('E2E_TEST_MODE') == 'true':
-        print("[E2E_TEST] Mocking Image Generation.")
-        return ('data:image/png;base64,mockimagedata', None)
-
     if not prompt:
         return None, "No image prompt provided."
 
