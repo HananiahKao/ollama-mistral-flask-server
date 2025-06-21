@@ -7,6 +7,7 @@ import time
 import uuid
 import json
 import threading
+from functools import partial
 from flask import Flask, request, Response, render_template
 import requests
 from bs4 import BeautifulSoup
@@ -109,20 +110,59 @@ def query_ollama(prompt):
     except Exception as e:
         return None, f"Error querying Ollama: {e}"
 
-def generate_image(prompt):
+def generation_progress_callback(task_id, step, timestep, latents):
+    """Callback function to update progress and generate thumbnails."""
+    task = tasks.get(task_id)
+    if not task:
+        return
+
+    num_steps = task.get('num_inference_steps', 100)
+    progress = 50 + int((step / num_steps) * 40)
+    task.update({
+        'status': f'Generating image... Step {step}/{num_steps}',
+        'progress': progress
+    })
+
+    if step > 0 and step % 10 == 0:
+        try:
+            latents_scaled = 1 / pipe.vae.config.scaling_factor * latents
+            with torch.no_grad():
+                image_tensor = pipe.vae.decode(latents_scaled).sample
+            image = pipe.image_processor.postprocess(image_tensor, output_type='pil')[0]
+            
+            thumbnail = image.copy()
+            thumbnail.thumbnail((128, 128))
+            
+            buf = io.BytesIO()
+            thumbnail.save(buf, format="JPEG", quality=75)
+            img_str = base64.b64encode(buf.getvalue()).decode("utf-8")
+            
+            task.update({'thumbnail': f"data:image/jpeg;base64,{img_str}"})
+            print(f"[DEBUG] Task {task_id}: Sent thumbnail at step {step}")
+        except Exception as e:
+            print(f"[ERROR] Task {task_id}: Could not generate thumbnail at step {step}: {e}")
+
+def generate_image(prompt, task_id, num_inference_steps=100):
     if not prompt:
         return None, "No image prompt provided."
 
-    load_sd_model() # Ensure the model is loaded before use
+    load_sd_model()
 
     try:
-        # Sanitize the prompt to remove problematic characters and limit length
         clean_prompt = re.sub(r'[^a-zA-Z0-9\s,.]', '', prompt).strip()
-        clean_prompt = clean_prompt[:200] # Truncate to a reasonable length
+        clean_prompt = clean_prompt[:200]
 
         print(f"[DEBUG] Generating image with sanitized prompt: {clean_prompt}")
+        
+        callback = partial(generation_progress_callback, task_id)
+        
         with torch.no_grad():
-            image = pipe(clean_prompt, num_inference_steps=100).images[0]
+            image = pipe(
+                clean_prompt, 
+                num_inference_steps=num_inference_steps, 
+                callback=callback, 
+                callback_steps=1
+            ).images[0]
         
         buf = io.BytesIO()
         image.save(buf, format="PNG")
@@ -138,32 +178,32 @@ def run_generation_task(task_id, context):
         start_time = time.time()
         print(f"\n--- [{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting generation task {task_id} ---")
         
-        # Step 1: Query Ollama
         tasks[task_id].update({'status': 'Generating HTML with Ollama...', 'progress': 10})
         prompt = build_prompt(context)
         html, err = query_ollama(prompt)
         if err or not html:
             raise Exception(err or 'Ollama returned an empty response.')
         
-        # Step 2: Extract image prompt
         tasks[task_id].update({'status': 'Extracting image prompt...', 'progress': 40})
         match = re.search(r'<!--\s*image_prompt:\s*(.*?)\s*-->', html)
         image_prompt = match.group(1) if match else "a random beautiful landscape"
 
-        # Step 3: Generate Image
-        tasks[task_id].update({'status': 'Generating image with Stable Diffusion...', 'progress': 50})
-        generated_image_data_url, err = generate_image(image_prompt)
+        num_inference_steps = 100
+        tasks[task_id].update({
+            'status': 'Generating image with Stable Diffusion...', 
+            'progress': 50,
+            'num_inference_steps': num_inference_steps
+        })
+        generated_image_data_url, err = generate_image(image_prompt, task_id, num_inference_steps=num_inference_steps)
         if err:
             print(f"[WARNING] Task {task_id}: Could not generate image: {err}")
         
-        # Step 4: Inline assets
-        tasks[task_id].update({'status': 'Inlining assets and finishing up...', 'progress': 90})
+        tasks[task_id].update({'status': 'Inlining assets and finishing up...', 'progress': 95})
         soup = BeautifulSoup(html, 'html.parser')
         for a_tag in soup.find_all('a'):
             a_tag['data-context'] = context
         final_html = inline_assets(str(soup), generated_image_data_url)
 
-        # Step 5: Finalize
         tasks[task_id].update({'status': 'Complete', 'progress': 100, 'result': final_html})
         print(f"--- Task {task_id} finished in {time.time() - start_time:.2f}s ---")
 
@@ -190,6 +230,7 @@ def generate(path):
 def stream(task_id):
     def event_stream():
         last_progress = -1
+        last_thumbnail = None
         while True:
             time.sleep(1)
             task = tasks.get(task_id)
@@ -197,23 +238,27 @@ def stream(task_id):
                 break 
 
             current_progress = task.get('progress', 0)
-            if current_progress > last_progress:
-                data = {'status': task['status'], 'progress': task['progress']}
+            current_thumbnail = task.get('thumbnail', None)
+
+            if current_progress > last_progress or current_thumbnail != last_thumbnail:
+                data = {'status': task['status'], 'progress': current_progress}
+                if current_thumbnail:
+                    data['thumbnail'] = current_thumbnail
                 if task['progress'] >= 100:
                     data['html'] = task['result']
                 
                 yield f"data: {json.dumps(data)}\n\n"
                 last_progress = current_progress
+                last_thumbnail = current_thumbnail
 
             if task['progress'] >= 100:
+                # Clean up the task from memory after it's finished and sent
+                if tasks.get(task_id):
+                    del tasks[task_id]
                 break
     
     return Response(event_stream(), mimetype='text/event-stream')
 
 if __name__ == '__main__':
-    # Pre-load the model on startup to avoid a delay on the first request.
     load_sd_model()
-    # Note: Flask's development server is not ideal for managing threads in production.
-    # A proper WSGI server like Gunicorn or uWSGI should be used.
-    # The `threaded=False` is kept to serialize the main requests, but generation is now in background threads.
     app.run(debug=True, use_reloader=False, port=5001, threaded=True) 

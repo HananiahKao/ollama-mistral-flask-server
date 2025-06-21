@@ -15,6 +15,9 @@
 <body>
     <div class="container">
         <h1>Building a new reality for you...</h1>
+        <div style="position: relative; width: 128px; height: 128px; margin: 0 auto 20px auto;">
+            <img id="thumbnail" src="" alt="Generating preview..." style="width: 128px; height: 128px; border-radius: 8px; background-color: #ccc; display: block;"/>
+        </div>
         <div class="progress-bar">
             <div class="progress-bar-fill" id="progressBar"></div>
         </div>
@@ -24,6 +27,7 @@
     <script>
         const progressBar = document.getElementById('progressBar');
         const statusText = document.getElementById('status');
+        const thumbnailImg = document.getElementById('thumbnail');
         const source = new EventSource(`/stream/{{ task_id }}`);
 
         source.onmessage = function(event) {
@@ -32,6 +36,10 @@
             // Update progress bar and status text
             progressBar.style.width = data.progress + '%';
             statusText.textContent = data.status;
+
+            if (data.thumbnail) {
+                thumbnailImg.src = data.thumbnail;
+            }
 
             // If the task is complete, stop listening and replace the page
             if (data.progress >= 100) {
