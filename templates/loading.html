@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Generating Your Page...</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background-color: #f0f2f5; color: #333; }
+        .container { text-align: center; }
+        h1 { font-size: 2em; margin-bottom: 20px; }
+        .progress-bar { width: 100%; max-width: 500px; background-color: #e0e0e0; border-radius: 10px; overflow: hidden; }
+        .progress-bar-fill { height: 20px; width: 0%; background-color: #4CAF50; transition: width 0.4s ease-in-out; }
+        p#status { margin-top: 10px; font-size: 1.1em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Building a new reality for you...</h1>
+        <div class="progress-bar">
+            <div class="progress-bar-fill" id="progressBar"></div>
+        </div>
+        <p id="status">Getting started...</p>
+    </div>
+
+    <script>
+        const progressBar = document.getElementById('progressBar');
+        const statusText = document.getElementById('status');
+        const source = new EventSource(`/stream/{{ task_id }}`);
+
+        source.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            
+            // Update progress bar and status text
+            progressBar.style.width = data.progress + '%';
+            statusText.textContent = data.status;
+
+            // If the task is complete, stop listening and replace the page
+            if (data.progress >= 100) {
+                source.close();
+                // A short delay to allow the user to read the "Complete" message
+                setTimeout(() => {
+                    document.open();
+                    document.write(data.html);
+                    document.close();
+                }, 500);
+            }
+        };
+
+        source.onerror = function(err) {
+            console.error("EventSource failed:", err);
+            statusText.textContent = "Error connecting to the server. Please refresh the page.";
+            source.close();
+        };
+    </script>
+</body>
+</html> 

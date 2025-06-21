@@ -4,7 +4,10 @@ import mimetypes
 import re
 import io
 import time
-from flask import Flask, request, Response, jsonify
+import uuid
+import json
+import threading
+from flask import Flask, request, Response, render_template
 import requests
 from bs4 import BeautifulSoup
 import torch
@@ -16,6 +19,7 @@ OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'mistral')
 
 app = Flask(__name__)
 pipe = None # Global pipeline object
+tasks = {} # Dictionary to hold the state of background tasks
 
 # --- Tame the logs ---
 diffusers.logging.set_verbosity_error()
@@ -129,55 +133,87 @@ def generate_image(prompt):
         print(f"[ERROR] Error generating image: {e}")
         return None, f"Error generating image: {e}"
 
+def run_generation_task(task_id, context):
+    try:
+        start_time = time.time()
+        print(f"\n--- [{time.strftime('%Y-%m-%d %H:%M:%S')}] Starting generation task {task_id} ---")
+        
+        # Step 1: Query Ollama
+        tasks[task_id].update({'status': 'Generating HTML with Ollama...', 'progress': 10})
+        prompt = build_prompt(context)
+        html, err = query_ollama(prompt)
+        if err or not html:
+            raise Exception(err or 'Ollama returned an empty response.')
+        
+        # Step 2: Extract image prompt
+        tasks[task_id].update({'status': 'Extracting image prompt...', 'progress': 40})
+        match = re.search(r'<!--\s*image_prompt:\s*(.*?)\s*-->', html)
+        image_prompt = match.group(1) if match else "a random beautiful landscape"
+
+        # Step 3: Generate Image
+        tasks[task_id].update({'status': 'Generating image with Stable Diffusion...', 'progress': 50})
+        generated_image_data_url, err = generate_image(image_prompt)
+        if err:
+            print(f"[WARNING] Task {task_id}: Could not generate image: {err}")
+        
+        # Step 4: Inline assets
+        tasks[task_id].update({'status': 'Inlining assets and finishing up...', 'progress': 90})
+        soup = BeautifulSoup(html, 'html.parser')
+        for a_tag in soup.find_all('a'):
+            a_tag['data-context'] = context
+        final_html = inline_assets(str(soup), generated_image_data_url)
+
+        # Step 5: Finalize
+        tasks[task_id].update({'status': 'Complete', 'progress': 100, 'result': final_html})
+        print(f"--- Task {task_id} finished in {time.time() - start_time:.2f}s ---")
+
+    except Exception as e:
+        print(f"[ERROR] Task {task_id} failed: {e}")
+        tasks[task_id].update({'status': f'Failed: {e}', 'progress': 100, 'result': f"<h1>Error</h1><p>The page generation failed: {e}</p>"})
+
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def generate(path):
-    start_time = time.time()
-    print(f"\n--- [{time.strftime('%Y-%m-%d %H:%M:%S')}] New request for '{request.path}' ---")
-
+    task_id = str(uuid.uuid4())
     user_agent = request.headers.get('User-Agent', 'Unknown')
     ip_address = request.remote_addr
     context = f"Request for '{request.path}' from IP: {ip_address}, User-Agent: {user_agent}"
-    print(f"[DEBUG] Context: {context}")
     
-    prompt = build_prompt(context)
+    tasks[task_id] = {'status': 'Pending', 'progress': 0}
 
-    print("[INFO] Generating HTML content with Ollama...")
-    ollama_start_time = time.time()
-    html, err = query_ollama(prompt)
-    print(f"[TIMER] Ollama query took {time.time() - ollama_start_time:.2f}s")
-    print(f"[DEBUG] Ollama HTML output:\n{html}")
+    thread = threading.Thread(target=run_generation_task, args=(task_id, context))
+    thread.start()
 
-    if err or not html:
-        return jsonify({'error': err or 'Ollama returned an empty response.'}), 500
+    return render_template('loading.html', task_id=task_id)
+
+@app.route('/stream/<task_id>')
+def stream(task_id):
+    def event_stream():
+        last_progress = -1
+        while True:
+            time.sleep(1)
+            task = tasks.get(task_id)
+            if not task:
+                break 
+
+            current_progress = task.get('progress', 0)
+            if current_progress > last_progress:
+                data = {'status': task['status'], 'progress': task['progress']}
+                if task['progress'] >= 100:
+                    data['html'] = task['result']
+                
+                yield f"data: {json.dumps(data)}\n\n"
+                last_progress = current_progress
+
+            if task['progress'] >= 100:
+                break
     
-    match = re.search(r'<!--\s*image_prompt:\s*(.*?)\s*-->', html)
-    image_prompt = match.group(1) if match else None
-    print(f"[DEBUG] Extracted image prompt: {image_prompt}")
-
-    print("[INFO] Generating image with Stable Diffusion...")
-    image_start_time = time.time()
-    generated_image_data_url, err = generate_image(image_prompt)
-    if not err:
-        print(f"[TIMER] Image generation took {time.time() - image_start_time:.2f}s")
-
-    if err:
-        print(f"[WARNING] Could not generate image: {err}")
-    
-    print("[INFO] Inlining assets...")
-    assets_start_time = time.time()
-    soup = BeautifulSoup(html, 'html.parser')
-    for a_tag in soup.find_all('a'):
-        a_tag['data-context'] = context
-
-    final_html = inline_assets(str(soup), generated_image_data_url)
-    print(f"[TIMER] Asset inlining took {time.time() - assets_start_time:.2f}s")
-    
-    print(f"--- Request for '{request.path}' finished in {time.time() - start_time:.2f}s ---")
-    return Response(final_html, mimetype='text/html')
+    return Response(event_stream(), mimetype='text/event-stream')
 
 if __name__ == '__main__':
     # Pre-load the model on startup to avoid a delay on the first request.
     load_sd_model()
-    # Run single-threaded to prevent multiple image generations at once
-    app.run(debug=True, use_reloader=False, port=5001, threaded=False) 
+    # Note: Flask's development server is not ideal for managing threads in production.
+    # A proper WSGI server like Gunicorn or uWSGI should be used.
+    # The `threaded=False` is kept to serialize the main requests, but generation is now in background threads.
+    app.run(debug=True, use_reloader=False, port=5001, threaded=True) 
