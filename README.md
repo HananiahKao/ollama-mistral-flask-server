@@ -12,20 +12,16 @@ This Flask application dynamically generates a unique, single-page HTML website 
 
 ## Setup
 
-This project uses `torch` and `diffusers`, which can be large. It is strongly recommended to use a Python virtual environment.
+This project uses `torch` and `diffusers`, which can be large. The setup script will create a Python virtual environment to manage dependencies.
 
-1.  **Create and activate a virtual environment:**
+1.  **Run the setup script:**
+    
+    For macOS and Linux:
     ```bash
-    python3 -m venv venv
-    source venv/bin/activate
+    ./setup.sh
     ```
 
-2.  **Install dependencies:**
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-3.  **Ensure Ollama is running** and the `mistral` model is available. You can pull it with:
+2.  **Ensure Ollama is running** and the `mistral` model is available. The setup script will remind you, but you can pull the model with:
     ```bash
     ollama pull mistral
     ```
