@@ -118,7 +118,7 @@ def generate_image(prompt):
 
         print(f"[DEBUG] Generating image with sanitized prompt: {clean_prompt}")
         with torch.no_grad():
-            image = pipe(clean_prompt).images[0]
+            image = pipe(clean_prompt, num_inference_steps=100).images[0]
         
         buf = io.BytesIO()
         image.save(buf, format="PNG")
