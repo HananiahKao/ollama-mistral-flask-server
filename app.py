@@ -15,26 +15,30 @@ OLLAMA_API_URL = os.getenv('OLLAMA_API_URL', 'http://localhost:11434/api/generat
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'mistral')
 
 app = Flask(__name__)
+pipe = None # Global pipeline object
 
 # --- Tame the logs ---
 diffusers.logging.set_verbosity_error()
 
-# --- Model Loading ---
-print("Loading Stable Diffusion model...")
-# Note: Using float32 as float16 can be problematic on CPU
-# Disabling the safety checker to prevent low-level bus errors on some hardware.
-pipe = StableDiffusionPipeline.from_pretrained(
-    "runwayml/stable-diffusion-v1-5", 
-    torch_dtype=torch.float32,
-    safety_checker=None
-)
-if torch.cuda.is_available():
-    print("CUDA is available, moving model to GPU.")
-    pipe = pipe.to("cuda")
-else:
-    print("CUDA not available, using CPU.")
-    pipe = pipe.to("cpu")
-print("Stable Diffusion model loaded.")
+def load_sd_model():
+    """Loads the Stable Diffusion model if it's not already loaded."""
+    global pipe
+    if pipe is None:
+        print("Loading Stable Diffusion model...")
+        # Note: Using float32 as float16 can be problematic on CPU
+        # Disabling the safety checker to prevent low-level bus errors on some hardware.
+        loaded_pipe = StableDiffusionPipeline.from_pretrained(
+            "runwayml/stable-diffusion-v1-5", 
+            torch_dtype=torch.float32,
+            safety_checker=None
+        )
+        if torch.cuda.is_available():
+            print("CUDA is available, moving model to GPU.")
+            pipe = loaded_pipe.to("cuda")
+        else:
+            print("CUDA not available, using CPU.")
+            pipe = loaded_pipe.to("cpu")
+        print("Stable Diffusion model loaded.")
 
 def get_asset_as_data_url(url):
     try:
@@ -104,6 +108,9 @@ def query_ollama(prompt):
 def generate_image(prompt):
     if not prompt:
         return None, "No image prompt provided."
+
+    load_sd_model() # Ensure the model is loaded before use
+
     try:
         # Sanitize the prompt to remove problematic characters and limit length
         clean_prompt = re.sub(r'[^a-zA-Z0-9\s,.]', '', prompt).strip()
@@ -170,5 +177,7 @@ def generate(path):
     return Response(final_html, mimetype='text/html')
 
 if __name__ == '__main__':
+    # Pre-load the model on startup to avoid a delay on the first request.
+    load_sd_model()
     # Run single-threaded to prevent multiple image generations at once
     app.run(debug=True, use_reloader=False, port=5001, threaded=False) 
