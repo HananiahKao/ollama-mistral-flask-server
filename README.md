@@ -31,7 +31,7 @@ This project uses `torch` and `diffusers`, which can be large. The setup script 
 Once the setup is complete, run the Flask server:
 
 ```bash
-python app.py
+./run.sh
 ```
 
 The server will start on `http://localhost:5001`. The first time you run it, the Stable Diffusion model will be downloaded (several gigabytes), which may take some time. Subsequent runs will use the cached model.
