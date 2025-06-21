@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+.venv/
+env/
+ENV/
+activate
+activate.csh
+activate.fish
+activate.ps1
+activate.xsh
+activate_this.py
+pip-selfcheck.json 
