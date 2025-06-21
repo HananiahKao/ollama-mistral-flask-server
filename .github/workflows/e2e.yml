@@ -1,0 +1,49 @@
+name: End-to-End Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  e2e-test:
+    name: Run E2E Test on Ubuntu
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+
+    - name: Make setup script executable
+      run: chmod +x ./setup.sh
+
+    - name: Run setup script
+      run: ./setup.sh
+
+    - name: Run server in background
+      env:
+        E2E_TEST_MODE: true
+      run: |
+        source venv/bin/activate
+        python app.py &
+        sleep 10 # Give the server time to start
+
+    - name: Test server with curl
+      run: |
+        response=$(curl http://127.0.0.1:5001/)
+        echo "Response from server: $response"
+        if [[ "$response" != *"mockimagedata"* ]]; then
+          echo "E2E test failed: Mock image data not found in response."
+          exit 1
+        fi
+        if [[ "$response" != *"Mock Page"* ]]; then
+            echo "E2E test failed: Mock page content not found in response."
+            exit 1
+        fi
+        echo "E2E test passed successfully!" 
