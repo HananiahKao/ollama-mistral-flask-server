@@ -113,8 +113,11 @@ def query_ollama(prompt):
 def generation_progress_callback(task_id, step, timestep, latents):
     """Callback function to update progress and generate thumbnails."""
     task = tasks.get(task_id)
-    if not task:
-        return
+    if not task or task.get('should_stop'):
+        # If the task has been flagged to stop, raise an exception to halt the pipeline.
+        if task:
+            task['status'] = "Cancelled by user."
+        raise Exception("Task cancelled by user.")
 
     num_steps = task.get('num_inference_steps', 100)
     progress = 50 + int((step / num_steps) * 40)
@@ -160,8 +163,7 @@ def generate_image(prompt, task_id, num_inference_steps=100):
             image = pipe(
                 clean_prompt, 
                 num_inference_steps=num_inference_steps, 
-                callback=callback, 
-                callback_steps=1
+                callback_on_step_end=callback
             ).images[0]
         
         buf = io.BytesIO()
@@ -170,8 +172,15 @@ def generate_image(prompt, task_id, num_inference_steps=100):
         print("[DEBUG] Image generated successfully.")
         return f"data:image/png;base64,{img_str}", None
     except Exception as e:
-        print(f"[ERROR] Error generating image: {e}")
-        return None, f"Error generating image: {e}"
+        if "Task cancelled by user" in str(e):
+            print(f"--- Task {task_id} gracefully stopped by user. ---")
+        else:
+            print(f"[ERROR] Task {task_id} failed: {e}")
+            tasks[task_id].update({'status': f'Failed: {e}', 'progress': 100, 'result': f"<h1>Error</h1><p>The page generation failed: {e}</p>"})
+    finally:
+        # Ensure the task is removed from memory after completion or cancellation
+        if task_id in tasks:
+            del tasks[task_id]
 
 def run_generation_task(task_id, context):
     try:
@@ -231,32 +240,36 @@ def stream(task_id):
     def event_stream():
         last_progress = -1
         last_thumbnail = None
-        while True:
-            time.sleep(1)
-            task = tasks.get(task_id)
-            if not task:
-                break 
+        try:
+            while True:
+                time.sleep(1)
+                task = tasks.get(task_id)
+                if not task:
+                    break 
 
-            current_progress = task.get('progress', 0)
-            current_thumbnail = task.get('thumbnail', None)
+                current_progress = task.get('progress', 0)
+                current_thumbnail = task.get('thumbnail', None)
 
-            if current_progress > last_progress or current_thumbnail != last_thumbnail:
-                data = {'status': task['status'], 'progress': current_progress}
-                if current_thumbnail:
-                    data['thumbnail'] = current_thumbnail
-                if task['progress'] >= 100:
-                    data['html'] = task['result']
-                
-                yield f"data: {json.dumps(data)}\n\n"
-                last_progress = current_progress
-                last_thumbnail = current_thumbnail
+                if current_progress > last_progress or current_thumbnail != last_thumbnail:
+                    data = {'status': task['status'], 'progress': current_progress}
+                    if current_thumbnail:
+                        data['thumbnail'] = current_thumbnail
+                    if task['progress'] >= 100:
+                        data['html'] = task['result']
+                    
+                    yield f"data: {json.dumps(data)}\n\n"
+                    last_progress = current_progress
+                    last_thumbnail = current_thumbnail
 
-            if task['progress'] >= 100:
-                # Clean up the task from memory after it's finished and sent
-                if tasks.get(task_id):
-                    del tasks[task_id]
-                break
-    
+                if task.get('progress', 0) >= 100 or task.get('should_stop'):
+                    break
+        except GeneratorExit:
+            print(f"[INFO] Client disconnected for task {task_id}. Flagging for cancellation.")
+            if task_id in tasks:
+                tasks[task_id]['should_stop'] = True
+        finally:
+            print(f"[INFO] Stream closed for task {task_id}.")
+
     return Response(event_stream(), mimetype='text/event-stream')
 
 if __name__ == '__main__':
