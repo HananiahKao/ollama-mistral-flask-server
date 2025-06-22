@@ -2,6 +2,9 @@
 # Exit on error
 set -e
 
+# Add Homebrew to PATH (for Ollama installed via Homebrew)
+export PATH="$HOME/.homebrew/bin:$PATH"
+
 # Check if Ollama is already running on its default port
 if ! curl -s --head http://127.0.0.1:11434 > /dev/null; then
     echo "Ollama not detected. Starting Ollama server in the background..."
