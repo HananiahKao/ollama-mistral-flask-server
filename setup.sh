@@ -53,4 +53,6 @@ if ! command -v ollama &> /dev/null; then
 fi
 
 # Pull the mistral model
+ollama serve &
+sleep 3  # Give the server a moment to start
 ollama pull mistral 
