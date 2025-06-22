@@ -2,17 +2,17 @@
 # This file defines the deployment configuration for the Flask app
 
 services:
-  # Main Flask web service
+  # Main Flask web service with Ollama running alongside
   - type: web
     name: ai-page-generator
     runtime: python
-    plan: standard  # Use standard plan for better performance with ML models
-    region: oregon  # Default region
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 300
+    plan: standard
+    region: oregon
+    buildCommand: ./setup.sh
+    startCommand: ./run_server.sh
     envVars:
       - key: OLLAMA_API_URL
-        value: https://your-ollama-instance.onrender.com/api/generate  # Update with your Ollama service URL
+        value: http://localhost:11434/api/generate
       - key: OLLAMA_MODEL
         value: mistral
       - key: PYTHON_VERSION
@@ -22,29 +22,8 @@ services:
     healthCheckPath: /
     scaling:
       minInstances: 1
-      maxInstances: 3
-      targetMemoryPercent: 70
-      targetCPUPercent: 70
-    maxShutdownDelaySeconds: 300  # Allow time for image generation to complete
-
-  # Optional: Ollama service (if you want to deploy Ollama alongside your app)
-  # Uncomment and configure if you want to run Ollama on Render
-  # - type: web
-  #   name: ollama-service
-  #   runtime: docker
-  #   plan: standard
-  #   region: oregon
-  #   repo: https://github.com/ollama/ollama
-  #   dockerCommand: ollama serve
-  #   envVars:
-  #     - key: OLLAMA_HOST
-  #       value: 0.0.0.0
-  #     - key: OLLAMA_ORIGINS
-  #       value: "*"
-  #   healthCheckPath: /api/tags
-  #   scaling:
-  #     minInstances: 1
-  #     maxInstances: 1  # Keep single instance for Ollama
+      maxInstances: 1 # Keep to 1 instance to avoid multiple Ollama/SD instances
+    maxShutdownDelaySeconds: 600
 
 # Environment groups for shared configuration
 envVarGroups:

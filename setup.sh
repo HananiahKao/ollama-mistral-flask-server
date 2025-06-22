@@ -32,4 +32,8 @@ echo "Please make sure Ollama is running and pull the model by running:"
 echo "ollama pull mistral"
 echo "-----------------"
 echo ""
-echo "You can now run the application with: python app.py" 
+echo "You can now run the application with: python app.py"
+
+# Install Ollama and pull the mistral model
+curl -f https://ollama.com/install.sh | sh
+ollama pull mistral 
