@@ -34,6 +34,23 @@ echo "-----------------"
 echo ""
 echo "You can now run the application with: python app.py"
 
-# Install Ollama and pull the mistral model
-curl -f https://ollama.com/install.sh | sh
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Install Homebrew locally if not already installed
+if [ ! -d "$HOME/.homebrew" ]; then
+  echo "Installing Homebrew locally..."
+  git clone --depth=1 https://github.com/Homebrew/brew $HOME/.homebrew
+fi
+
+# Add Homebrew to PATH
+export PATH="$HOME/.homebrew/bin:$PATH"
+
+# Install Ollama using Homebrew (if not already installed)
+if ! command -v ollama &> /dev/null; then
+  echo "Installing Ollama with Homebrew..."
+  brew install ollama
+fi
+
+# Pull the mistral model
 ollama pull mistral 
