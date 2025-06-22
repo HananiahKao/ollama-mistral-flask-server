@@ -4,6 +4,7 @@
 flask>=3.0
 requests>=2.32
 beautifulsoup4>=4.12
+gunicorn>=21.0  # Production WSGI server for deployment
 # Note: The following ML/AI libraries are resource-intensive.
 # You may need to install a specific version of torch that matches your hardware (CPU/GPU).
 # See: https://pytorch.org/get-started/locally/

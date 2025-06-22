@@ -1,0 +1,58 @@
+# Render Blueprint for AI-Powered Web Page Generator
+# This file defines the deployment configuration for the Flask app
+
+services:
+  # Main Flask web service
+  - type: web
+    name: ai-page-generator
+    runtime: python
+    plan: standard  # Use standard plan for better performance with ML models
+    region: oregon  # Default region
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 300
+    envVars:
+      - key: OLLAMA_API_URL
+        value: https://your-ollama-instance.onrender.com/api/generate  # Update with your Ollama service URL
+      - key: OLLAMA_MODEL
+        value: mistral
+      - key: PYTHON_VERSION
+        value: "3.9"
+      - key: PORT
+        value: "10000"
+    healthCheckPath: /
+    scaling:
+      minInstances: 1
+      maxInstances: 3
+      targetMemoryPercent: 70
+      targetCPUPercent: 70
+    maxShutdownDelaySeconds: 300  # Allow time for image generation to complete
+
+  # Optional: Ollama service (if you want to deploy Ollama alongside your app)
+  # Uncomment and configure if you want to run Ollama on Render
+  # - type: web
+  #   name: ollama-service
+  #   runtime: docker
+  #   plan: standard
+  #   region: oregon
+  #   repo: https://github.com/ollama/ollama
+  #   dockerCommand: ollama serve
+  #   envVars:
+  #     - key: OLLAMA_HOST
+  #       value: 0.0.0.0
+  #     - key: OLLAMA_ORIGINS
+  #       value: "*"
+  #   healthCheckPath: /api/tags
+  #   scaling:
+  #     minInstances: 1
+  #     maxInstances: 1  # Keep single instance for Ollama
+
+# Environment groups for shared configuration
+envVarGroups:
+  - name: ai-settings
+    envVars:
+      - key: DIFFUSION_STEPS
+        value: "100"
+      - key: IMAGE_QUALITY
+        value: "high"
+      - key: MAX_PROMPT_LENGTH
+        value: "200" 
