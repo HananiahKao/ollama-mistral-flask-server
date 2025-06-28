@@ -140,7 +140,7 @@ def inline_assets(html_content, generated_image_data_url=None):
             else:
                 tag.decompose()
         else:
-        tag.decompose()
+            tag.decompose()
             
     return str(soup)
 
@@ -148,10 +148,18 @@ def build_prompt(context):
     prompt = f"""
 You are a creative web page generator. Your only output should be a valid HTML document.
 Generate a complete, single, visually appealing HTML page about a random, interesting topic.
+
+REQUIREMENTS:
+- The page MUST include CSS animations (keyframes, transitions, or transforms)
+- The page MUST include JavaScript functionality for dynamic or interactive behaviors (event-driven updates, client-side logic, DOM manipulation, etc.)
 - The page must include one and only one `<img>` tag with `id="generated-image"` and an empty `src` attribute.
 - Immediately before the `<img>` tag, include an HTML comment with an image prompt like this: `<!-- image_prompt: a photorealistic image of a cat programming -->`
 - DO NOT use any markdown.
 - Your response must start with `<!DOCTYPE html>` and end with `</html>`.
+
+EXAMPLES OF REQUIRED FEATURES:
+- CSS animations: hover effects, loading animations, color transitions, movement effects
+- JavaScript: interactive buttons, form validation, dynamic content updates, event listeners, DOM manipulation
 
 The context for this generation is: {context}
 """
@@ -206,7 +214,7 @@ def run_generation_task(task_id, context):
         
         tasks[task_id].update({'status': 'Generating HTML with Ollama...', 'progress': 10})
         prompt = build_prompt(context)
-    html, err = query_ollama(prompt)
+        html, err = query_ollama(prompt)
         if err or not html:
             raise Exception(err or 'Ollama returned an empty response.')
         
@@ -221,7 +229,7 @@ def run_generation_task(task_id, context):
             'num_inference_steps': num_inference_steps
         })
         generated_image_data_url, err = generate_image(image_prompt, task_id, num_inference_steps=num_inference_steps)
-    if err:
+        if err:
             print(f"[WARNING] Task {task_id}: Could not generate image: {err}")
             generated_image_data_url = None
         
