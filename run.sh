@@ -5,6 +5,10 @@
 
 echo "--- Starting Application Server ---"
 
+# Use local Homebrew installation in project directory (for Render compatibility)
+export HOMEBREW_PREFIX="$PWD/.homebrew"
+export PATH="$PWD/.homebrew/bin:$PATH"
+
 # Check if the virtual environment exists
 if [ ! -d "venv" ]; then
     echo "ERROR: Virtual environment 'venv' not found."

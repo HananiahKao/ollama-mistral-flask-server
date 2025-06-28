@@ -37,14 +37,15 @@ echo "You can now run the application with: python app.py"
 # Install Python dependencies
 pip install -r requirements.txt
 
-# Install Homebrew locally if not already installed
-if [ ! -d "$HOME/.homebrew" ]; then
-  echo "Installing Homebrew locally..."
-  git clone --depth=1 https://github.com/Homebrew/brew $HOME/.homebrew
-fi
+# Use local Homebrew installation in project directory (for Render compatibility)
+export HOMEBREW_PREFIX="$PWD/.homebrew"
+export PATH="$PWD/.homebrew/bin:$PATH"
 
-# Add Homebrew to PATH
-export PATH="$HOME/.homebrew/bin:$PATH"
+# Install Homebrew locally if not already installed
+if [ ! -d "$PWD/.homebrew" ]; then
+  echo "Installing Homebrew locally..."
+  git clone --depth=1 https://github.com/Homebrew/brew $PWD/.homebrew
+fi
 
 # Install Ollama using Homebrew (if not already installed)
 if ! command -v ollama &> /dev/null; then

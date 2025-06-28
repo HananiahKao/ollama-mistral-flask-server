@@ -140,7 +140,7 @@ def inline_assets(html_content, generated_image_data_url=None):
             else:
                 tag.decompose()
         else:
-            tag.decompose()
+        tag.decompose()
             
     return str(soup)
 
@@ -206,7 +206,7 @@ def run_generation_task(task_id, context):
         
         tasks[task_id].update({'status': 'Generating HTML with Ollama...', 'progress': 10})
         prompt = build_prompt(context)
-        html, err = query_ollama(prompt)
+    html, err = query_ollama(prompt)
         if err or not html:
             raise Exception(err or 'Ollama returned an empty response.')
         
@@ -221,7 +221,7 @@ def run_generation_task(task_id, context):
             'num_inference_steps': num_inference_steps
         })
         generated_image_data_url, err = generate_image(image_prompt, task_id, num_inference_steps=num_inference_steps)
-        if err:
+    if err:
             print(f"[WARNING] Task {task_id}: Could not generate image: {err}")
             generated_image_data_url = None
         

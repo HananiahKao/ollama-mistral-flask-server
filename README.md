@@ -17,14 +17,14 @@ This project uses `torch` and `diffusers`, which can be large. The setup script 
 1.  **Run the setup script:**
     
     For macOS and Linux:
-    ```bash
+   ```bash
     ./setup.sh
-    ```
+   ```
 
 2.  **Ensure Ollama is running** and the `mistral` model is available. The setup script will remind you, but you can pull the model with:
-    ```bash
+   ```bash
     ollama pull mistral
-    ```
+   ```
 
 ## Running the Application
 

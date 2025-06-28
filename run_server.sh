@@ -2,8 +2,17 @@
 # Exit on error
 set -e
 
-# Add Homebrew to PATH (for Ollama installed via Homebrew)
-export PATH="$HOME/.homebrew/bin:$PATH"
+# Use local Homebrew installation in project directory (for Render compatibility)
+export HOMEBREW_PREFIX="$PWD/.homebrew"
+export PATH="$PWD/.homebrew/bin:$PATH"
+
+# Activate virtual environment
+echo "Activating virtual environment..."
+source venv/bin/activate
+
+# Install/update dependencies if needed
+echo "Checking dependencies..."
+pip install -r requirements.txt
 
 # Check if Ollama is already running on its default port
 if ! curl -s --head http://127.0.0.1:11434 > /dev/null; then
