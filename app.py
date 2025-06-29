@@ -16,7 +16,8 @@ from diffusers import StableDiffusionPipeline
 from diffusers.callbacks import PipelineCallback
 import diffusers
 
-OLLAMA_API_URL = os.getenv('OLLAMA_API_URL', 'http://localhost:11434/api/generate')
+# Use 127.0.0.1 instead of 127.0.0.1 for better deployment compatibility
+OLLAMA_API_URL = os.getenv('OLLAMA_API_URL', 'http://127.0.0.1:11434/api/generate')
 OLLAMA_MODEL = os.getenv('OLLAMA_MODEL', 'mistral')
 
 app = Flask(__name__)
@@ -165,6 +166,252 @@ The context for this generation is: {context}
 """
     return prompt
 
+def generate_fallback_html(context):
+    """Generate a fallback HTML page when Ollama is not available."""
+    fallback_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Web Page Generator</title>
+    <style>
+        @keyframes fadeIn {{
+            from {{ opacity: 0; transform: translateY(20px); }}
+            to {{ opacity: 1; transform: translateY(0); }}
+        }}
+        
+        @keyframes pulse {{
+            0%, 100% {{ transform: scale(1); }}
+            50% {{ transform: scale(1.05); }}
+        }}
+        
+        body {{
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: white;
+        }}
+        
+        .container {{
+            max-width: 800px;
+            margin: 0 auto;
+            animation: fadeIn 1s ease-out;
+        }}
+        
+        .header {{
+            text-align: center;
+            margin-bottom: 40px;
+        }}
+        
+        .header h1 {{
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }}
+        
+        .content {{
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }}
+        
+        .feature-card {{
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 10px;
+            padding: 20px;
+            margin: 15px 0;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }}
+        
+        .feature-card:hover {{
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+            animation: pulse 2s infinite;
+        }}
+        
+        .status-indicator {{
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff6b6b;
+            margin-right: 10px;
+            animation: pulse 2s infinite;
+        }}
+        
+        .button {{
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            margin: 10px;
+        }}
+        
+        .button:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+        }}
+        
+        .generated-image {{
+            width: 100%;
+            max-width: 400px;
+            height: 300px;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px auto;
+            color: white;
+            font-size: 18px;
+            text-align: center;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Dynamic Web Page Generator</h1>
+            <p>AI-Powered Content Creation Platform</p>
+        </div>
+        
+        <div class="content">
+            <h2><span class="status-indicator"></span>Service Status</h2>
+            <p>Currently running in fallback mode. The AI content generation service (Ollama) is not available, but the application is fully functional for demonstration purposes.</p>
+            
+            <div class="feature-card">
+                <h3>✨ Features</h3>
+                <ul>
+                    <li>Dynamic HTML generation with CSS animations</li>
+                    <li>Interactive JavaScript functionality</li>
+                    <li>Real-time image generation with Stable Diffusion</li>
+                    <li>Fully inlined assets for dependency-free operation</li>
+                    <li>Context-aware content generation</li>
+                </ul>
+            </div>
+            
+            <div class="feature-card">
+                <h3>🔧 Technical Details</h3>
+                <p><strong>Request Context:</strong> {context}</p>
+                <p><strong>Ollama Status:</strong> <span style="color: #ff6b6b;">Not Available</span></p>
+                <p><strong>Image Generation:</strong> <span style="color: #00b894;">Available (Stable Diffusion)</span></p>
+            </div>
+        </div>
+        
+        <div class="content">
+            <h2>🎨 Generated Content Preview</h2>
+            <div class="generated-image">
+                <div>
+                    <p>📸 Image Generation Available</p>
+                    <p><small>Stable Diffusion model loaded and ready</small></p>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 20px;">
+                <button class="button" onclick="showFeatures()">Show Features</button>
+                <button class="button" onclick="animateContent()">Animate Content</button>
+                <button class="button" onclick="generateRandomContent()">Generate Random</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- image_prompt: a modern web development workspace with multiple monitors showing code and design tools -->
+    <img id="generated-image" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" style="display: none;">
+    
+    <script>
+        // JavaScript functionality for interactive features
+        let animationCount = 0;
+        
+        function showFeatures() {{
+            const features = [
+                'Dynamic HTML Generation',
+                'CSS Animations & Transitions',
+                'Interactive JavaScript',
+                'Real-time Image Generation',
+                'Context-Aware Content',
+                'Fully Inlined Assets'
+            ];
+            
+            const content = document.querySelector('.content');
+            const featureList = document.createElement('div');
+            featureList.className = 'feature-card';
+            featureList.innerHTML = '<h3>🎯 Active Features</h3><ul>' + 
+                features.map(f => '<li>' + f + '</li>').join('') + '</ul>';
+            
+            content.appendChild(featureList);
+            featureList.style.animation = 'fadeIn 0.5s ease-out';
+        }}
+        
+        function animateContent() {{
+            animationCount++;
+            const cards = document.querySelectorAll('.feature-card');
+            cards.forEach((card, index) => {{
+                setTimeout(() => {{
+                    card.style.transform = 'rotate(5deg) scale(1.05)';
+                    setTimeout(() => {{
+                        card.style.transform = 'rotate(0deg) scale(1)';
+                    }}, 300);
+                }}, index * 100);
+            }});
+        }}
+        
+        function generateRandomContent() {{
+            const topics = [
+                'Artificial Intelligence',
+                'Web Development',
+                'Data Science',
+                'Machine Learning',
+                'Cloud Computing',
+                'Cybersecurity'
+            ];
+            
+            const randomTopic = topics[Math.floor(Math.random() * topics.length)];
+            const header = document.querySelector('.header h1');
+            header.textContent = '🚀 ' + randomTopic + ' Hub';
+            header.style.animation = 'pulse 1s ease-in-out';
+        }}
+        
+        // Add event listeners for enhanced interactivity
+        document.addEventListener('DOMContentLoaded', function() {{
+            console.log('Dynamic Web Page Generator loaded successfully!');
+            
+            // Add hover effects to all interactive elements
+            const buttons = document.querySelectorAll('.button');
+            buttons.forEach(button => {{
+                button.addEventListener('mouseenter', function() {{
+                    this.style.background = 'linear-gradient(45deg, #00b894, #00a085)';
+                }});
+                button.addEventListener('mouseleave', function() {{
+                    this.style.background = 'linear-gradient(45deg, #ff6b6b, #ee5a24)';
+                }});
+            }});
+            
+            // Add click effects to feature cards
+            const cards = document.querySelectorAll('.feature-card');
+            cards.forEach(card => {{
+                card.addEventListener('click', function() {{
+                    this.style.background = 'rgba(255, 255, 255, 0.25)';
+                    setTimeout(() => {{
+                        this.style.background = 'rgba(255, 255, 255, 0.15)';
+                    }}, 200);
+                }});
+            }});
+        }});
+    </script>
+</body>
+</html>"""
+    return fallback_html
+
 def query_ollama(prompt):
     payload = {"model": OLLAMA_MODEL, "prompt": prompt, "stream": False}
     try:
@@ -215,8 +462,14 @@ def run_generation_task(task_id, context):
         tasks[task_id].update({'status': 'Generating HTML with Ollama...', 'progress': 10})
         prompt = build_prompt(context)
         html, err = query_ollama(prompt)
+        
+        # If Ollama is not available, use fallback HTML
         if err or not html:
-            raise Exception(err or 'Ollama returned an empty response.')
+            if "Ollama service not available" in str(err) or "404" in str(err):
+                print(f"[INFO] Task {task_id}: Using fallback HTML due to Ollama unavailability")
+                html = generate_fallback_html(context)
+            else:
+                raise Exception(err or 'Ollama returned an empty response.')
         
         tasks[task_id].update({'status': 'Extracting image prompt...', 'progress': 40})
         match = re.search(r'<!--\s*image_prompt:\s*(.*?)\s*-->', html)
