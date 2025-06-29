@@ -298,8 +298,6 @@ def test_fallback_functionality(client):
 
 def test_ollama_url_fallback(client):
     """Test that the app tries multiple Ollama URLs and falls back gracefully."""
-    # Mock the check_ollama_availability function
-    with patch('app.check_ollama_availability', return_value=None):
         with patch('app.generate_fallback_html') as mock_fallback:
             mock_fallback.return_value = '<!DOCTYPE html><html><body>Fallback</body></html>'
             
